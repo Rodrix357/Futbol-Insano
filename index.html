@@ -389,16 +389,31 @@ function update(dt){
     if(cd>0&&cd<1.55){const push=(1.55-cd)*.22;bot.position.x+=cx/cd*push;bot.position.z+=cz/cd*push;}
    }
   }
-  const forwardInput=forward;
   const boosting=!!keys[' ']&&rocketBoost>0;
   const maxSpeed=boosting?27:18;
-  const accel=forwardInput*17*(boosting?1.35:1);
-  const drag=Math.abs(forwardInput)<.05?6.5:2.4;
-  player.userData.speed=clamp((player.userData.speed||0)+accel*dt-Math.sign(player.userData.speed||0)*drag*dt,-8,maxSpeed);
-  const steer=side*(.8+Math.min(1,Math.abs(player.userData.speed)/12)*1.25);
-  player.rotation.y-=steer*dt*(player.userData.speed<0?-.72:1);
-  player.position.x=clamp(player.position.x+Math.sin(player.rotation.y)*player.userData.speed*dt,-26.5,26.5);
-  player.position.z=clamp(player.position.z-Math.cos(player.rotation.y)*player.userData.speed*dt,-26.5,26.5);
+  const currentSpeed=player.userData.speed||0;
+
+  // Joystick directo: arriba=-Z, abajo=+Z, izquierda=-X, derecha=+X.
+  if(stickActive && Math.hypot(stickX,stickY)>.08){
+   const magnitude=Math.min(1,Math.hypot(stickX,stickY));
+   const moveX=stickX/magnitude, moveZ=stickY/magnitude;
+   const targetSpeed=maxSpeed*magnitude;
+   player.userData.speed+=(targetSpeed-currentSpeed)*Math.min(1,dt*8);
+   player.position.x=clamp(player.position.x+moveX*player.userData.speed*dt,-26.5,26.5);
+   player.position.z=clamp(player.position.z+moveZ*player.userData.speed*dt,-26.5,26.5);
+   player.rotation.y=Math.atan2(moveX,-moveZ);
+  }else{
+   const forwardInput=forward;
+   const accel=forwardInput*17*(boosting?1.35:1);
+   const drag=Math.abs(forwardInput)<.05?6.5:2.4;
+   player.userData.speed=clamp(currentSpeed+accel*dt-Math.sign(currentSpeed)*drag*dt,-8,maxSpeed);
+   const speedFactor=.72+Math.min(1,Math.abs(player.userData.speed)/10)*1.55;
+   const steer=clamp(side,-1,1)*speedFactor;
+   player.rotation.y-=steer*dt*(player.userData.speed<-.15?-.82:1);
+   player.position.x=clamp(player.position.x+Math.sin(player.rotation.y)*player.userData.speed*dt,-26.5,26.5);
+   player.position.z=clamp(player.position.z-Math.cos(player.rotation.y)*player.userData.speed*dt,-26.5,26.5);
+  }
+  if(!stickActive && Math.abs(forward)<.05)player.userData.speed*=Math.pow(.94,dt*60);
   if(Math.abs(player.position.x)>=26.45||Math.abs(player.position.z)>=26.45)player.userData.speed*=.55;
   if(keys.c||actionQueue.c){keys.c=false;actionQueue.c=false;if(rocketJump<=0){rocketJump=.95;player.userData.air=.95;callAction('SALTO','¡Impulso activado!');}}
   if(player.userData.air>0){player.userData.air=Math.max(0,player.userData.air-dt);player.position.y=Math.sin((.95-player.userData.air)/.95*Math.PI)*1.65;if(player.userData.air===0)player.position.y=0;}
@@ -447,6 +462,8 @@ window.confirmManagerClub=()=>{const pick=$('managerClub');if(!pick||!pick.value
 window.changeManagerClub=()=>{$('managerSetup').style.display='block';$('managerDashboard').style.display='none';if(managerClubName)$('managerClub').value=managerClubName};
 
 let controlMode='manual',gamepadIndex=null,lastPadButtons={},autoAssist=false;
+// Ejes analógicos reales del joystick táctil (Rocket Insano usa acelerador y dirección progresivos).
+let stickX=0,stickY=0,stickActive=false;
 let careerTeamName='Real Madrid',managerClubName='',isCareerMatch=false,isManagerMatch=false,rocketJump=0,rocketBoost=100,rocketHitCooldown=0,careerFaceDataURL='';
 function applyCareerFaceToPlayer(target){
  if(!target||!careerFaceDataURL)return;
@@ -488,10 +505,10 @@ function pollGamepad(){
 }
 // Joystick táctil analógico: desplaza el pulgar para caminar en cualquier dirección.
 (()=>{const base=$('stickBase'),knob=$('stickKnob');if(!base||!knob)return;let active=false,cx=0,cy=0;
- const reset=()=>{active=false;keys.w=keys.a=keys.s=keys.d=false;knob.style.transform='translate(0px,0px)'};
- base.addEventListener('pointerdown',e=>{active=true;base.setPointerCapture(e.pointerId);const r=base.getBoundingClientRect();cx=r.left+r.width/2;cy=r.top+r.height/2;move(e)});
- base.addEventListener('pointermove',e=>{if(active)move(e)});base.addEventListener('pointerup',reset);base.addEventListener('pointercancel',reset);
- function move(e){let dx=e.clientX-cx,dy=e.clientY-cy,len=Math.hypot(dx,dy),max=42;if(len>max){dx=dx/len*max;dy=dy/len*max}knob.style.transform=`translate(${dx}px,${dy}px)`;keys.a=dx< -9;keys.d=dx>9;keys.w=dy< -9;keys.s=dy>9}
+ const reset=()=>{active=false;stickActive=false;stickX=0;stickY=0;keys.w=keys.a=keys.s=keys.d=false;knob.style.transform='translate(0px,0px)'};
+ base.addEventListener('pointerdown',e=>{e.preventDefault();active=true;stickActive=true;try{base.setPointerCapture(e.pointerId)}catch(_){}const r=base.getBoundingClientRect();cx=r.left+r.width/2;cy=r.top+r.height/2;move(e)});
+ base.addEventListener('pointermove',e=>{if(active){e.preventDefault();move(e)}});base.addEventListener('pointerup',reset);base.addEventListener('pointercancel',reset);base.addEventListener('lostpointercapture',reset);
+ function move(e){let dx=e.clientX-cx,dy=e.clientY-cy,len=Math.hypot(dx,dy),max=42;if(len>max){dx=dx/len*max;dy=dy/len*max}stickX=dx/max;stickY=dy/max;knob.style.transform=`translate(${dx}px,${dy}px)`;keys.a=dx< -9;keys.d=dx>9;keys.w=dy< -9;keys.s=dy>9}
 })();
 window.addEventListener('gamepadconnected',e=>{gamepadIndex=e.gamepad.index;toast('Mando conectado: '+e.gamepad.id)});
 window.addEventListener('gamepaddisconnected',()=>{gamepadIndex=null;toast('Mando desconectado')});
@@ -522,7 +539,7 @@ function startMusic(){
 }
 function stopMusic(){musicEnabled=false;if(musicTimer){clearInterval(musicTimer);musicTimer=null;}if(musicCtx){try{musicCtx._gameMaster?.gain.setTargetAtTime(0,musicCtx.currentTime,.08);musicCtx._gameBass?.stop(musicCtx.currentTime+.2);}catch(e){}musicCtx=null;}const b=$('musicToggle');if(b){b.textContent='♫ MÚSICA: OFF';b.setAttribute('aria-pressed','false');}}
 $('musicToggle').addEventListener('click',()=>{if(musicEnabled)stopMusic();else startMusic();});
-window.startGame=m=>{if(m!=='football'){isCareerMatch=false;isManagerMatch=false}if(running){running=false;if(rafId)cancelAnimationFrame(rafId);rafId=0}mode=m;keys={};actionQueue={};stamina=100;goalPause=0;document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));$('hud').style.display='block';$('hint').style.display='block';$('pause').style.display='block';$('musicToggle').style.display='block';$('hint').textContent=m==='football'?'Joystick/WASD mover · X pase · C tiro/reanudar · T entrada · ESPACIO correr · P pausa':'WASD conducir · ESPACIO turbo · C salto/impulso · X golpe · P pausa';scoreA=scoreB=elapsed=0;cardCount=penaltyCount=0;foulCooldown=0;restartState=null;playerCards=new Map();lastBallTouch='home';keepers=[];referee=null;$('actionCall').style.display='none';$('score').textContent=`${selectedHome} 0 - 0 ${selectedAway}`;$('matchStatus').textContent='ENERGÍA 100% · 0%';duration=Number($('duration').value||300);running=true;paused=false;setupScene();startMusic()};
+window.startGame=m=>{if(m!=='football'){isCareerMatch=false;isManagerMatch=false}if(running){running=false;if(rafId)cancelAnimationFrame(rafId);rafId=0}mode=m;keys={};actionQueue={};stamina=100;goalPause=0;document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));$('hud').style.display='block';$('hint').style.display='block';$('pause').style.display='block';$('musicToggle').style.display='block';$('hint').textContent=m==='football'?'Joystick/WASD mover · X pase · C tiro/reanudar · T entrada · ESPACIO correr · P pausa':'JOYSTICK: mueve el coche en la dirección exacta del pulgar · ⚡ turbo · C salto · X golpe · P pausa';scoreA=scoreB=elapsed=0;cardCount=penaltyCount=0;foulCooldown=0;restartState=null;playerCards=new Map();lastBallTouch='home';keepers=[];referee=null;$('actionCall').style.display='none';$('score').textContent=`${selectedHome} 0 - 0 ${selectedAway}`;$('matchStatus').textContent='ENERGÍA 100% · 0%';duration=Number($('duration').value||300);running=true;paused=false;setupScene();startMusic()};
 window.togglePause=()=>{if(!running)return;if(elapsed>=duration){showScreen('pauseScreen');return}paused=!paused;if(paused)showScreen('pauseScreen');else{document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));if(clock3)clock3.getDelta();animate()}};
 window.exitGame=()=>{running=false;paused=false;if(rafId)cancelAnimationFrame(rafId);rafId=0;stopMusic();if(renderer){try{renderer.dispose();renderer.forceContextLoss();}catch(e){}renderer=null;}if(scene){scene.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>{for(const v of Object.values(m)){if(v&&v.isTexture)v.dispose();}m.dispose();});}});scene.clear();scene=null;}camera=null;$('game').innerHTML='';$('hud').style.display=$('hint').style.display=$('pause').style.display=$('musicToggle').style.display='none';showScreen('menu')};
 window.applySettings=()=>{controlMode=$('controlMode')?.value||'manual';const q=$('quality')?.value||'medium';if(renderer){renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,q==='high'?2:q==='low'?1:1.4));renderer.shadowMap.enabled=q!=='low'}toast('Ajustes guardados');showScreen('menu')};
